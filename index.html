@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voice Assistant Chat</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right,  #1000c6ff, #6c0808ff);
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: linear-gradient(to right,  #1000c6ff, #6c0808ff);
+      max-width: 600px;
+      margin: 1rem auto;
+      border-radius: 8px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    }
+    .message {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 20px;
+      line-height: 1.3;
+      word-wrap: break-word;
+    }
+    .message.user {
+      background-color: #007bff42;
+      color: white;
+      align-self: flex-end;
+      border-bottom-right-radius: 0;
+    }
+    .message.assistant {
+      background-color: #e4e6eb7a;
+      color: #050505;
+      align-self: flex-start;
+      border-bottom-left-radius: 0;
+    }
+    .typing {
+      font-style: italic;
+      color: #777;
+      padding-left: 10px;
+      margin-bottom: 8px;
+    }
+    .input-area {
+      max-width: 600px;
+      margin: 0 auto 1rem;
+      display: flex;
+      gap: 10px;
+      padding: 0 1rem;
+    }
+    input[type="text"] {
+      flex: 1;
+      font-size: 1rem;
+      padding: 10px 15px;
+      border-radius: 25px;
+      border: 1px solid #ccc;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus {
+      border-color: #007bff;
+    }
+    button.mic-btn {
+      width: 50px;
+      background: #007bff;
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+    button.mic-btn.recording {
+      background: #dc3545;
+    }
+    button.mic-btn:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="chat-container" id="chat"></div>
+
+  <form id="chat-form" class="input-area">
+    <input id="user-input" type="text" placeholder="Type your message..." autocomplete="off" />
+    <button type="button" id="mic-btn" class="mic-btn" title="Start Voice Input">🎤</button>
+  </form>
+
+  <script>
+    const chatContainer = document.getElementById('chat');
+    const chatForm = document.getElementById('chat-form');
+    const userInput = document.getElementById('user-input');
+    const micBtn = document.getElementById('mic-btn');
+
+    let recognition;
+    let isRecording = false;
+
+    function addMessage(text, sender) {
+      const msgDiv = document.createElement('div');
+      msgDiv.classList.add('message', sender);
+      msgDiv.textContent = text;
+      chatContainer.appendChild(msgDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function showTyping() {
+      const typingDiv = document.createElement('div');
+      typingDiv.id = 'typing';
+      typingDiv.classList.add('typing');
+      typingDiv.textContent = 'Assistant is typing...';
+      chatContainer.appendChild(typingDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function removeTyping() {
+      const typingDiv = document.getElementById('typing');
+      if (typingDiv) typingDiv.remove();
+    }
+
+    // Speak text and call onEndCallback after speaking finishes
+    function speakText(text, onEndCallback) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => {
+        if (onEndCallback) onEndCallback();
+      };
+      speechSynthesis.speak(utterance);
+    }
+
+    function playLaughSound() {
+      const audio = new Audio('/static');
+      audio.play().then(() => {
+        console.log('Laugh sound played');
+      }).catch(err => {
+        console.error('Failed to play laugh sound:', err);
+      });
+    }
+
+    chatForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = userInput.value.trim();
+      if (!text) return;
+
+      addMessage(text, 'user');
+      userInput.value = '';
+      showTyping();
+
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: text})
+        });
+        const data = await res.json();
+        removeTyping();
+
+        if (data.reply) {
+          addMessage(data.reply, 'assistant');
+
+          // Speak the assistant reply, then play laugh sound if flagged as joke
+          speakText(data.reply, () => {
+            if (data.is_joke) {
+              playLaughSound();
+            }
+          });
+
+        } else {
+          addMessage('Error: No reply from server.', 'assistant');
+        }
+      } catch (err) {
+        removeTyping();
+        addMessage('Error connecting to server.', 'assistant');
+      }
+    });
+
+    if ('webkitSpeechRecognition' in window) {
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        isRecording = true;
+        micBtn.classList.add('recording');
+        micBtn.title = 'Stop Voice Input';
+      };
+      recognition.onend = () => {
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        micBtn.title = 'Start Voice Input';
+      };
+      recognition.onerror = (event) => {
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        micBtn.title = 'Start Voice Input';
+        console.error('Speech recognition error', event);
+      };
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        userInput.value = transcript;
+        chatForm.dispatchEvent(new Event('submit'));
+      };
+    } else {
+      micBtn.disabled = true;
+      micBtn.title = 'Voice input not supported in this browser';
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (!recognition) return;
+      if (isRecording) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    });
+  </script>
+
+</body>
+</html>
